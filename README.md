@@ -10,10 +10,10 @@ pytorch = 2.6
 - [x] Have code masked_conv.py
 - [x] Code run with GPU 
 # Need supplement:
-- [] Cuda kernel for voting because CUDA error: an illegal memory access was encountered
-- [] Integrate Mask conv 
-- [] Teacher-Student
-- [] Loss function also don't optimize (In the code using basic function)
-- [] Data augmentation
-- [] More......
+- [ ] Cuda kernel for voting because CUDA error: an illegal memory access was encountered
+- [ ] Integrate Mask conv 
+- [ ] Teacher-Student
+- [ ] Loss function also don't optimize (In the code using basic function)
+- [ ] Data augmentation
+- [ ] More......
 

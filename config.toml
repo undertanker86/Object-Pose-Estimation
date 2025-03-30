@@ -1,0 +1,34 @@
+[cma]
+num_ch_enc = [64, 256, 512, 1024, 2048]
+scales = [0, 1, 2, 3]
+cma_layers = [2, 1]
+num_head = 4
+head_ratio = 2
+sgt = 0.1
+
+[vector_decoder]
+in_channels_list = [64, 256, 512, 1024, 2048]
+
+[training]
+batch_size = 2
+learning_rate = 0.001
+weight_decay = 0.0001
+supervised_epochs = 100
+self_supervised_epochs = 50
+use_self_supervised = true
+save_frequency = 10
+gradient_clip = 5.0
+scheduler_step_size = 20
+scheduler_gamma = 0.5
+
+[lambdas]
+lambda_pos = 1.0
+lambda_keypoints = 1.0
+lambda_vf = 0.5
+lambda_sem = 0.5
+lambda_depth = 0.5
+
+[data]
+root_path = "./"
+image_height = 480
+image_width = 640

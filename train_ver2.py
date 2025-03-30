@@ -6,119 +6,398 @@ import json
 import os
 from collections import defaultdict
 import trimesh
-import Dpobjj.vote as hough_voting_cuda_1
-import FSREDepth.networks.depth_decoder as depth_decoder
-import FSREDepth.networks.resnet_encoder as resnet_encoder
-import FSREDepth.networks.seg_decoder as seg_decoder
-import Dpobjj.decoderVote as hough_voting_cpu
+from model import MTGOE
 import torch
 from pprint import pprint
 from torch.utils.data import DataLoader
 import torch.optim as optim
 import torch.nn.functional as F
-class BOPDataset(Dataset):
-    def __init__(self, dataset_root, split='train', obj_id=1, transforms=None,
-    model_path='./models',
+import masked_conv
+from TeacherRenderer import TeacherRenderer
+from mmd import PoseEstimationModel
+
+# import FSREDepth.networks.cma as cma
+
+# class BOPDataset(Dataset):
+#     def __init__(self, dataset_root, split='train', obj_id=1, transforms=None,
+#     model_path='./models',
     
-    ):
+#     ):
+#         self.dataset_root = dataset_root
+#         self.split = split
+#         self.obj_id = obj_id
+#         self.transforms = transforms
+#         self.model_path = model_path
+#         self.data = []  # Store data in a list of dictionaries
+#         self.cam_model_path = os.path.join(self.dataset_root,self.model_path, f'obj_{self.obj_id:06d}.ply')
+#         self.model = self.load_ply_model(self.cam_model_path)
+        
+#         scene_dir = os.path.join(self.dataset_root, self.split)
+#         for scene_id in sorted(os.listdir(scene_dir)):
+#             scene_path = os.path.join(scene_dir, scene_id)
+#             rgb_path = os.path.join(scene_path, 'rgb')
+#             mask_path = os.path.join(scene_path, 'mask')
+#             mask_visib_path = os.path.join(scene_path, 'mask_visib')
+#             gt_path = os.path.join(scene_path, 'scene_gt.json')
+#             cam_params_path = os.path.join(scene_path, 'scene_camera.json')
+
+#             try:
+#                 with open(gt_path, 'r') as f:
+#                     gts = json.load(f)
+#                 with open(cam_params_path, 'r') as f:
+#                     cam_params = json.load(f)
+#             except FileNotFoundError:
+#                 print(f"Warning: scene_gt.json or scene_camera.json not found in {scene_path}. Skipping this scene.")
+#                 continue # Skip this scene if the file is missing.
+#             cam_k_values = {key: value["cam_K"] for key, value in cam_params.items()}
+#             for img_id, objects in gts.items():  # Iterate through image IDs
+#                 img_id = int(img_id)
+#                 rgb_file = os.path.join(rgb_path, f"{img_id:06d}.png")
+#                 for obj_data in objects: #Iterate through the objects
+#                     if obj_data['obj_id'] == int(self.obj_id):  #Filter by object ID
+#                         mask_file = os.path.join(mask_path, f"{img_id:06d}_000000.png")
+#                         # print(mask_file)
+#                         mask_visib_file = os.path.join(mask_visib_path, f"{img_id:06d}_000000.png")
+#                         if os.path.exists(rgb_file) and os.path.exists(mask_file) and os.path.exists(mask_visib_file):
+#                           self.data.append({
+#                               'rgb_file': rgb_file,
+#                               'mask_file': mask_file,
+#                               'mask_visib_file': mask_visib_file,
+#                               'obj_id': self.obj_id,
+#                               'img_id': img_id,
+#                               'cam_R_m2c': obj_data.get('cam_R_m2c', None), #Handle missing keys gracefully
+#                               'cam_t_m2c': obj_data.get('cam_t_m2c', None), #Handle missing keys gracefully
+#                               'cam_K': cam_k_values[str(img_id)],
+#                           })
+#                         else:
+#                           print(f"Warning: Missing image or mask file for img_id {img_id}, obj_id {self.obj_id}. Skipping.")
+                       
+
+
+#     def __len__(self):
+#         return len(self.data)
+
+#     def __getitem__(self, idx):
+#         sample = self.data[idx]
+#         try:
+#             rgb = cv2.imread(sample['rgb_file'])
+#             rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+#             mask = cv2.imread(sample['mask_file'], cv2.IMREAD_GRAYSCALE)
+#             mask_visib = cv2.imread(sample['mask_visib_file'], cv2.IMREAD_GRAYSCALE)
+#         except Exception as e:
+#             print(f"Error loading image or mask: {e}, skipping sample {idx}.")
+#             return None
+
+#         rgb = torch.from_numpy(rgb.transpose(2, 0, 1).astype(np.float32))
+#         mask = torch.from_numpy(mask.astype(np.float32))
+#         mask_visib = torch.from_numpy(mask_visib.astype(np.float32))
+#         cam_param = torch.tensor(sample['cam_K'], dtype=torch.float32)
+#         cam_param = cam_param.view(3, 3)
+#         #Handle missing pose data gracefully
+#         cam_R_m2c = torch.tensor(sample['cam_R_m2c'], dtype=torch.float32) if sample['cam_R_m2c'] else None
+#         cam_t_m2c = torch.tensor(sample['cam_t_m2c'], dtype=torch.float32) if sample['cam_t_m2c'] else None
+        
+#         #  --- Generate Ground Truth Data ---
+#         h, w = rgb.shape[1:]
+#         depth_map = self.generate_depth_map(sample['cam_R_m2c'], sample['cam_t_m2c'], cam_param, h, w)
+#         segmentation_mask = self.generate_segmentation_mask(mask, h, w)  #Example of on-the-fly segmentation
+#         vector_field = self.generate_field_vectors(cam_R_m2c, cam_t_m2c, self.model, cam_param, h, w)
+#         # Placeholder for Field Vectors (replace with your calculation)
+#         # field_vectors = np.zeros((h, w, 2), dtype=np.float32)
+#         extens = self.compute_extent(self.cam_model_path)
+#         return {
+#             'rgb': rgb,
+#             'mask': mask,
+#             'mask_visib': mask_visib,
+#             'depth_map': depth_map,
+#             'segmentation_mask': segmentation_mask,
+#             'vector_field': vector_field,
+#             'obj_id': sample['obj_id'],
+#             'img_id': sample['img_id'],
+#             'cam_R_m2c': cam_R_m2c,
+#             'cam_t_m2c': cam_t_m2c,
+#             'cam_K': cam_param,
+#             'extens': extens
+            
+
+#         }
+#     @staticmethod
+#     def load_ply_model(ply_path):
+#         """Loads a 3D model from a PLY file."""
+#         try:
+#             model = trimesh.load_mesh(ply_path)
+#             return model
+#         except Exception as e:
+#             print(f"Error loading PLY model from {ply_path}: {e}")
+#             return None
+#     @staticmethod 
+#     def compute_extent(ply_file):
+#         mesh = trimesh.load_mesh(ply_file)
+#         min_corner = mesh.bounds[0]  # Minimum XYZ coordinates
+#         max_corner = mesh.bounds[1]  # Maximum XYZ coordinates
+#         extent = max_corner - min_corner  # Compute width, height, depth
+#         return extent
+    
+#     def generate_depth_map(self, R, t, K, height, width):
+#         """Generates a depth map from the object's pose and 3D model."""
+#         if R is None or K is None:
+#           print("Warning: cam_R_m2c or cam_K is None. Returning zero depth map.")
+#           return np.zeros((height, width))
+
+#         R = np.array(R).reshape(3, 3) # Reshape R into 3x3 matrix
+#         t = np.array(t) #convert t to numpy array
+#         K = np.array(K).reshape(3, 3) # Reshape K into 3x3 matrix
+#         points_model = self.model.vertices
+#         points_camera = (R @ points_model.T).T + t
+#         points_image = (K @ points_camera.T).T
+#         points_image[:, 0] /= points_image[:, 2]
+#         points_image[:, 1] /= points_image[:, 2]
+#         depth_map = np.zeros((height, width))
+#         for point in points_image:
+#             x, y, z = point
+#             if 0 <= x < width and 0 <= y < height:
+#                 depth_map[int(y), int(x)] = z
+#         return depth_map
+
+#     def generate_segmentation_mask(self, mask, h, w):
+#         """Generates a segmentation mask.  Replace this with your actual logic."""
+#         # This is a placeholder; you need to define the segmentation mask generation
+#         # here based on your annotations.
+#         return mask.reshape(h, w)
+    
+#     @staticmethod
+#     def generate_field_vectors(cam_R_m2c, cam_t_m2c, model, K, height, width):
+
+#         K = np.array(K).reshape(3, 3)  # This should be a 3x3 matrix
+
+#         if cam_R_m2c is not None:
+#             cam_R_m2c = np.array(cam_R_m2c).reshape(3, 3)
+#         else:
+#             raise ValueError("cam_R_m2c is None, cannot generate field vectors.")
+        
+#         # Ensure cam_t_m2c is a 3x1 vector
+#         if cam_t_m2c is not None:
+#             cam_t_m2c = np.array(cam_t_m2c).reshape(3,)
+#         else:
+#             raise ValueError("cam_t_m2c is None, cannot generate field vectors.")
+        
+#         # 3D model vertices (N x 3)
+#         points_model = model.vertices  # Should be N x 3
+        
+#         # Ensure points_model is in the right shape (N, 3)
+#         if points_model.shape[1] != 3:
+#             raise ValueError("points_model must have shape (N, 3).")
+        
+#         # Transform model vertices to camera coordinates (using rotation + translation)
+#         points_camera = np.dot(points_model, cam_R_m2c.T) + cam_t_m2c  # Should give N x 3
+        
+#         # Project to image plane (2D)
+#         points_image = np.dot(points_camera, K.T)  # This will give N x 3
+        
+#         # Normalize points to get (x, y) image coordinates in the range [0, width] and [0, height]
+#         points_image[:, 0] /= points_image[:, 2]
+#         points_image[:, 1] /= points_image[:, 2]
+
+#         # Initialize flow field (2D array with flow vectors)
+#         flow_field = np.zeros((height, width, 2), dtype=np.float32)
+
+#         # Map 3D points onto the 2D image plane and generate flow vectors
+#         for point in points_image:
+#             x, y, z = point
+#             if 0 <= x < width and 0 <= y < height:
+#                 # Example: flow vector from the image center to the projected point
+#                 flow_field[int(y), int(x)] = [x - width // 2, y - height // 2]
+
+#         return flow_field
+class BOPDataset(Dataset):
+    def __init__(self, dataset_root, split='train', obj_id=1, transforms=None):
         self.dataset_root = dataset_root
         self.split = split
         self.obj_id = obj_id
         self.transforms = transforms
-        self.model_path = model_path
         self.data = []  # Store data in a list of dictionaries
-        self.cam_model_path = os.path.join(self.dataset_root,self.model_path, f'obj_{self.obj_id:06d}.ply')
-        self.model = self.load_ply_model(self.cam_model_path)
         
-        scene_dir = os.path.join(self.dataset_root, self.split)
-        for scene_id in sorted(os.listdir(scene_dir)):
-            scene_path = os.path.join(scene_dir, scene_id)
-            rgb_path = os.path.join(scene_path, 'rgb')
-            mask_path = os.path.join(scene_path, 'mask')
-            mask_visib_path = os.path.join(scene_path, 'mask_visib')
-            gt_path = os.path.join(scene_path, 'scene_gt.json')
-            cam_params_path = os.path.join(scene_path, 'scene_camera.json')
-
-            try:
-                with open(gt_path, 'r') as f:
-                    gts = json.load(f)
-                with open(cam_params_path, 'r') as f:
-                    cam_params = json.load(f)
-            except FileNotFoundError:
-                print(f"Warning: scene_gt.json or scene_camera.json not found in {scene_path}. Skipping this scene.")
-                continue # Skip this scene if the file is missing.
-            cam_k_values = {key: value["cam_K"] for key, value in cam_params.items()}
-            for img_id, objects in gts.items():  # Iterate through image IDs
-                img_id = int(img_id)
-                rgb_file = os.path.join(rgb_path, f"{img_id:06d}.png")
-                for obj_data in objects: #Iterate through the objects
-                    if obj_data['obj_id'] == int(self.obj_id):  #Filter by object ID
-                        mask_file = os.path.join(mask_path, f"{img_id:06d}_000000.png")
-                        # print(mask_file)
-                        mask_visib_file = os.path.join(mask_visib_path, f"{img_id:06d}_000000.png")
-                        if os.path.exists(rgb_file) and os.path.exists(mask_file) and os.path.exists(mask_visib_file):
-                          self.data.append({
-                              'rgb_file': rgb_file,
-                              'mask_file': mask_file,
-                              'mask_visib_file': mask_visib_file,
-                              'obj_id': self.obj_id,
-                              'img_id': img_id,
-                              'cam_R_m2c': obj_data.get('cam_R_m2c', None), #Handle missing keys gracefully
-                              'cam_t_m2c': obj_data.get('cam_t_m2c', None), #Handle missing keys gracefully
-                              'cam_K': cam_k_values[str(img_id)],
-                          })
-                        else:
-                          print(f"Warning: Missing image or mask file for img_id {img_id}, obj_id {self.obj_id}. Skipping.")
-                       
-
-
+        # Load 3D model
+        model_path = os.path.join(self.dataset_root, 'models', f'obj_{self.obj_id:06d}.ply')
+        self.model_path = model_path
+        if os.path.exists(model_path):
+            self.model = self.load_ply_model(model_path)
+        else:
+            print(f"Warning: No model found at {model_path}")
+            self.model = None
+        
+        # Load global camera parameters if available
+        camera_path = os.path.join(self.dataset_root, 'camera.json')
+        if os.path.exists(camera_path):
+            with open(camera_path, 'r') as f:
+                self.global_camera_params = json.load(f)
+        else:
+            self.global_camera_params = None
+        
+        # Path to the split (train or test)
+        split_path = os.path.join(self.dataset_root, self.split)
+        if not os.path.exists(split_path):
+            print(f"Warning: Split path {split_path} does not exist")
+            return
+        
+        # Iterate over scene folders in the split
+        for scene_folder in os.listdir(split_path):
+            scene_path = os.path.join(split_path, scene_folder)
+            if not os.path.isdir(scene_path):
+                continue
+                
+            # Load scene ground truth
+            scene_gt_path = os.path.join(scene_path, 'scene_gt.json')
+            if not os.path.exists(scene_gt_path):
+                print(f"Warning: No scene_gt.json found in {scene_path}")
+                continue
+                
+            with open(scene_gt_path, 'r') as f:
+                scene_gt = json.load(f)
+                
+            # Load scene camera parameters
+            scene_camera_path = os.path.join(scene_path, 'scene_camera.json')
+            if not os.path.exists(scene_camera_path):
+                print(f"Warning: No scene_camera.json found in {scene_path}")
+                continue
+                
+            with open(scene_camera_path, 'r') as f:
+                scene_camera = json.load(f)
+                
+            # Iterate over images in this scene
+            for img_id_str, objects in scene_gt.items():
+                img_id = int(img_id_str)
+                
+                # Check if camera parameters exist for this image
+                if img_id_str not in scene_camera:
+                    print(f"Warning: No camera parameters for image {img_id} in scene {scene_folder}")
+                    continue
+                
+                cam_params = scene_camera[img_id_str]
+                
+                # Path to RGB image
+                rgb_path = os.path.join(scene_path, 'rgb', f'{img_id:06d}.png')
+                if not os.path.exists(rgb_path):
+                    print(f"Warning: RGB image not found at {rgb_path}")
+                    continue
+                
+                # Find our object of interest in this image
+                for obj_idx, obj_info in enumerate(objects):
+                    if obj_info['obj_id'] == self.obj_id:
+                        # Paths to mask files
+                        mask_path = os.path.join(scene_path, 'mask', f'{img_id:06d}_{obj_idx:06d}.png')
+                        mask_visib_path = os.path.join(scene_path, 'mask_visib', f'{img_id:06d}_{obj_idx:06d}.png')
+                        
+                        # Check if mask files exist
+                        mask_exists = os.path.exists(mask_path)
+                        mask_visib_exists = os.path.exists(mask_visib_path)
+                        
+                        # Add sample to dataset
+                        self.data.append({
+                            'scene_id': scene_folder,
+                            'img_id': img_id,
+                            'obj_idx': obj_idx,
+                            'obj_id': self.obj_id,
+                            'rgb_path': rgb_path,
+                            'mask_path': mask_path if mask_exists else None,
+                            'mask_visib_path': mask_visib_path if mask_visib_exists else None,
+                            'cam_R_m2c': obj_info.get('cam_R_m2c', None),
+                            'cam_t_m2c': obj_info.get('cam_t_m2c', None),
+                            'cam_K': cam_params.get('cam_K', None)
+                        })
+        
+        print(f"Loaded {len(self.data)} samples for object {obj_id} in {split} set")
+    
     def __len__(self):
         return len(self.data)
-
+    
     def __getitem__(self, idx):
         sample = self.data[idx]
-        try:
-            rgb = cv2.imread(sample['rgb_file'])
-            rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
-            mask = cv2.imread(sample['mask_file'], cv2.IMREAD_GRAYSCALE)
-            mask_visib = cv2.imread(sample['mask_visib_file'], cv2.IMREAD_GRAYSCALE)
-        except Exception as e:
-            print(f"Error loading image or mask: {e}, skipping sample {idx}.")
-            return None
-
-        rgb = torch.from_numpy(rgb.transpose(2, 0, 1).astype(np.float32))
-        mask = torch.from_numpy(mask.astype(np.float32))
-        mask_visib = torch.from_numpy(mask_visib.astype(np.float32))
-        cam_param = torch.tensor(sample['cam_K'], dtype=torch.float32)
-        cam_param = cam_param.view(3, 3)
-        #Handle missing pose data gracefully
-        cam_R_m2c = torch.tensor(sample['cam_R_m2c'], dtype=torch.float32) if sample['cam_R_m2c'] else None
-        cam_t_m2c = torch.tensor(sample['cam_t_m2c'], dtype=torch.float32) if sample['cam_t_m2c'] else None
         
-        #  --- Generate Ground Truth Data ---
-        h, w = rgb.shape[1:]
-        depth_map = self.generate_depth_map(sample['cam_R_m2c'], sample['cam_t_m2c'], cam_param, h, w)
-        segmentation_mask = self.generate_segmentation_mask(mask, h, w)  #Example of on-the-fly segmentation
-        vector_field = self.generate_field_vectors(cam_R_m2c, cam_t_m2c, self.model, cam_param, h, w)
-        # Placeholder for Field Vectors (replace with your calculation)
-        # field_vectors = np.zeros((h, w, 2), dtype=np.float32)
-        extens = self.compute_extent(self.cam_model_path)
-        return {
-            'rgb': rgb,
-            'mask': mask,
-            'mask_visib': mask_visib,
-            'depth_map': depth_map,
-            'segmentation_mask': segmentation_mask,
-            'vector_field': vector_field,
+        # Load RGB image
+        rgb = cv2.imread(sample['rgb_path'])
+        if rgb is None:
+            raise ValueError(f"Could not load RGB image from {sample['rgb_path']}")
+        rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+        
+        # Load mask if available
+        mask = np.zeros((rgb.shape[0], rgb.shape[1]), dtype=np.uint8)
+        if sample['mask_path'] and os.path.exists(sample['mask_path']):
+            mask = cv2.imread(sample['mask_path'], cv2.IMREAD_GRAYSCALE)
+            # Normalize mask (sometimes BOP masks are 255 for object pixels)
+            mask = (mask > 0).astype(np.uint8)
+        
+        # Load visible mask if available
+        mask_visib = np.zeros((rgb.shape[0], rgb.shape[1]), dtype=np.uint8)
+        if sample['mask_visib_path'] and os.path.exists(sample['mask_visib_path']):
+            mask_visib = cv2.imread(sample['mask_visib_path'], cv2.IMREAD_GRAYSCALE)
+            # Normalize mask (sometimes BOP masks are 255 for object pixels)
+            mask_visib = (mask_visib > 0).astype(np.uint8)
+        
+        # Convert to torch tensors
+        rgb_tensor = torch.from_numpy(rgb.transpose(2, 0, 1)).float() / 255.0  # Normalize to [0, 1]
+        mask_tensor = torch.from_numpy(mask).float()
+        mask_visib_tensor = torch.from_numpy(mask_visib).float()
+        
+        # Get camera parameters
+        cam_K = np.array(sample['cam_K']).reshape(3, 3)
+        cam_K_tensor = torch.from_numpy(cam_K).float()
+        
+        # Get pose if available
+        cam_R_m2c = sample.get('cam_R_m2c', None)
+        cam_t_m2c = sample.get('cam_t_m2c', None)
+        
+        cam_R_m2c_tensor = torch.from_numpy(np.array(cam_R_m2c).reshape(3, 3)).float() if cam_R_m2c else None
+        cam_t_m2c_tensor = torch.from_numpy(np.array(cam_t_m2c)).float() if cam_t_m2c else None
+        
+        # Create depth map if the model and pose are available
+        depth_map_tensor = None
+        if self.model is not None and cam_R_m2c is not None and cam_t_m2c is not None:
+            depth_map = self.generate_depth_map(cam_R_m2c, cam_t_m2c, cam_K, rgb.shape[0], rgb.shape[1])
+            depth_map_tensor = torch.from_numpy(depth_map).float()
+        
+        # Create vector field if the model and pose are available
+        vector_field_tensor = None
+        if self.model is not None and cam_R_m2c is not None and cam_t_m2c is not None:
+            vector_field = self.generate_field_vectors(cam_R_m2c, cam_t_m2c, self.model, cam_K, rgb.shape[0], rgb.shape[1])
+            vector_field_tensor = torch.from_numpy(vector_field).float()
+        
+        # Calculate model extent/diameter for metrics
+        extens = None
+        if self.model is not None:
+            extens = self.compute_extent(self.model_path)
+            extens = torch.tensor(extens, dtype=torch.float32)
+        
+        # Create return dictionary
+        result = {
+            'rgb': rgb_tensor,
+            'mask': mask_tensor,
+            'mask_visib': mask_visib_tensor,
+            'cam_K': cam_K_tensor,
             'obj_id': sample['obj_id'],
-            'img_id': sample['img_id'],
-            'cam_R_m2c': cam_R_m2c,
-            'cam_t_m2c': cam_t_m2c,
-            'cam_K': cam_param,
-            'extens': extens
-            
-
+            'img_id': sample['img_id']
         }
+        
+        # Add optional fields if available
+        if cam_R_m2c_tensor is not None:
+            result['cam_R_m2c'] = cam_R_m2c_tensor
+        if cam_t_m2c_tensor is not None:
+            result['cam_t_m2c'] = cam_t_m2c_tensor
+        if depth_map_tensor is not None:
+            result['depth_map'] = depth_map_tensor
+        if vector_field_tensor is not None:
+            result['vector_field'] = vector_field_tensor
+        if mask_tensor is not None:
+            result['segmentation_mask'] = mask_tensor  # Using the same mask for segmentation
+        if extens is not None:
+            result['extens'] = extens
+        
+        # Apply transforms if specified
+        if self.transforms:
+            result = self.transforms(result)
+        
+        return result
+        
     @staticmethod
     def load_ply_model(ply_path):
         """Loads a 3D model from a PLY file."""
@@ -128,85 +407,102 @@ class BOPDataset(Dataset):
         except Exception as e:
             print(f"Error loading PLY model from {ply_path}: {e}")
             return None
-    @staticmethod 
-    def compute_extent(ply_file):
-        mesh = trimesh.load_mesh(ply_file)
-        min_corner = mesh.bounds[0]  # Minimum XYZ coordinates
-        max_corner = mesh.bounds[1]  # Maximum XYZ coordinates
-        extent = max_corner - min_corner  # Compute width, height, depth
-        return extent
-    
+            
     def generate_depth_map(self, R, t, K, height, width):
         """Generates a depth map from the object's pose and 3D model."""
-        if R is None or K is None:
-          print("Warning: cam_R_m2c or cam_K is None. Returning zero depth map.")
-          return np.zeros((height, width))
-
-        R = np.array(R).reshape(3, 3) # Reshape R into 3x3 matrix
-        t = np.array(t) #convert t to numpy array
-        K = np.array(K).reshape(3, 3) # Reshape K into 3x3 matrix
-        points_model = self.model.vertices
-        points_camera = (R @ points_model.T).T + t
-        points_image = (K @ points_camera.T).T
-        points_image[:, 0] /= points_image[:, 2]
-        points_image[:, 1] /= points_image[:, 2]
-        depth_map = np.zeros((height, width))
-        for point in points_image:
-            x, y, z = point
-            if 0 <= x < width and 0 <= y < height:
-                depth_map[int(y), int(x)] = z
+        if self.model is None:
+            return np.zeros((height, width), dtype=np.float32)
+            
+        # Convert inputs to numpy arrays if they're not already
+        R = np.array(R).reshape(3, 3)
+        t = np.array(t)
+        K = np.array(K).reshape(3, 3)
+        
+        # Get model vertices
+        points_model = np.array(self.model.vertices)
+        
+        # Transform to camera coordinates
+        points_camera = np.dot(points_model, R.T) + t
+        
+        # Project to image coordinates
+        points_image = np.dot(points_camera, K.T)
+        
+        # Normalize
+        z = points_image[:, 2]
+        points_image[:, 0] /= z
+        points_image[:, 1] /= z
+        
+        # Create depth map
+        depth_map = np.zeros((height, width), dtype=np.float32)
+        
+        # Filter points that are in the image bounds
+        valid_idx = (points_image[:, 0] >= 0) & (points_image[:, 0] < width) & \
+                    (points_image[:, 1] >= 0) & (points_image[:, 1] < height)
+        
+        # Convert to integer pixel coordinates
+        x = np.round(points_image[valid_idx, 0]).astype(int)
+        y = np.round(points_image[valid_idx, 1]).astype(int)
+        z_valid = z[valid_idx]
+        
+        # Assign depth values (handle z-fighting with minimum depth)
+        for i in range(len(x)):
+            if depth_map[y[i], x[i]] == 0 or z_valid[i] < depth_map[y[i], x[i]]:
+                depth_map[y[i], x[i]] = z_valid[i]
+        
         return depth_map
-
-    def generate_segmentation_mask(self, mask, h, w):
-        """Generates a segmentation mask.  Replace this with your actual logic."""
-        # This is a placeholder; you need to define the segmentation mask generation
-        # here based on your annotations.
-        return mask.reshape(h, w)
+    
+    def generate_field_vectors(self, R, t, model, K, height, width):
+        """Generates a vector field pointing to the object center."""
+        # Create empty vector field
+        vector_field = np.zeros((height, width, 2), dtype=np.float32)
+        
+        # Convert to numpy arrays
+        R = np.array(R).reshape(3, 3)
+        t = np.array(t)
+        K = np.array(K).reshape(3, 3)
+        
+        # Compute object center in 3D
+        vertices = np.array(model.vertices)
+        center_3d = vertices.mean(axis=0)
+        
+        # Transform center to camera coordinates
+        center_camera = np.dot(center_3d, R.T) + t
+        
+        # Project center to image
+        center_image = np.dot(center_camera, K.T)
+        center_image /= center_image[2]
+        center_x, center_y = center_image[0], center_image[1]
+        
+        # Generate vector field (vectors pointing to center)
+        y_coords, x_coords = np.mgrid[0:height, 0:width]
+        
+        # Compute vectors (from pixel to center)
+        dx = center_x - x_coords
+        dy = center_y - y_coords
+        
+        # Normalize vectors
+        magnitude = np.sqrt(dx**2 + dy**2) + 1e-10
+        dx /= magnitude
+        dy /= magnitude
+        
+        # Store in vector field
+        vector_field[:, :, 0] = dx
+        vector_field[:, :, 1] = dy
+        
+        return vector_field
     
     @staticmethod
-    def generate_field_vectors(cam_R_m2c, cam_t_m2c, model, K, height, width):
-
-        K = np.array(K).reshape(3, 3)  # This should be a 3x3 matrix
-
-        if cam_R_m2c is not None:
-            cam_R_m2c = np.array(cam_R_m2c).reshape(3, 3)
-        else:
-            raise ValueError("cam_R_m2c is None, cannot generate field vectors.")
-        
-        # Ensure cam_t_m2c is a 3x1 vector
-        if cam_t_m2c is not None:
-            cam_t_m2c = np.array(cam_t_m2c).reshape(3,)
-        else:
-            raise ValueError("cam_t_m2c is None, cannot generate field vectors.")
-        
-        # 3D model vertices (N x 3)
-        points_model = model.vertices  # Should be N x 3
-        
-        # Ensure points_model is in the right shape (N, 3)
-        if points_model.shape[1] != 3:
-            raise ValueError("points_model must have shape (N, 3).")
-        
-        # Transform model vertices to camera coordinates (using rotation + translation)
-        points_camera = np.dot(points_model, cam_R_m2c.T) + cam_t_m2c  # Should give N x 3
-        
-        # Project to image plane (2D)
-        points_image = np.dot(points_camera, K.T)  # This will give N x 3
-        
-        # Normalize points to get (x, y) image coordinates in the range [0, width] and [0, height]
-        points_image[:, 0] /= points_image[:, 2]
-        points_image[:, 1] /= points_image[:, 2]
-
-        # Initialize flow field (2D array with flow vectors)
-        flow_field = np.zeros((height, width, 2), dtype=np.float32)
-
-        # Map 3D points onto the 2D image plane and generate flow vectors
-        for point in points_image:
-            x, y, z = point
-            if 0 <= x < width and 0 <= y < height:
-                # Example: flow vector from the image center to the projected point
-                flow_field[int(y), int(x)] = [x - width // 2, y - height // 2]
-
-        return flow_field
+    def compute_extent(model_path):
+        """Compute the extent (width, height, depth) of the 3D model."""
+        try:
+            mesh = trimesh.load_mesh(model_path)
+            min_corner = mesh.bounds[0]  # Minimum XYZ coordinates
+            max_corner = mesh.bounds[1]  # Maximum XYZ coordinates
+            extent = max_corner - min_corner  # Compute width, height, depth
+            return extent
+        except Exception as e:
+            print(f"Error computing extent from {model_path}: {e}")
+            return np.array([0.1, 0.1, 0.1])  # Default extent
 def vector_field_loss(pred_vectors, gt_vectors, mask):
     """
     Computes the vector field loss (Lvf) using Smooth L1 loss.
@@ -227,156 +523,6 @@ def vector_field_loss(pred_vectors, gt_vectors, mask):
     num_object_pixels = mask.sum() + 1e-6  # Avoid division by zero
     return loss / num_object_pixels
 
-def train_model():
-    # Setup device (GPU if available)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Initialize dataset
-    data = BOPDataset(dataset_root='./data/lmo', split='train', obj_id=1)
-
-    dataloader = DataLoader(data, batch_size=1, shuffle=True)
-
-    # Initialize the model components
-    model_encoder = resnet_encoder.ResnetEncoder(num_layers=18, pretrained=True).to(device)
-    model_depth_decoder = depth_decoder.DepthDecoder(num_ch_enc=model_encoder.num_ch_enc, scales=range(4)).to(device)
-    model_seg_decoder = seg_decoder.SegDecoder(num_ch_enc=model_encoder.num_ch_enc, scales=[0]).to(device)
-    # model_vector_field = hough_voting_cuda_1.EncoderDecoder().to(device)
-    model_vector_field = hough_voting_cpu.HoughVotingDecoder(8, 480, 640).to(device)
-    # Combine the models in a dictionary (or directly integrate if needed)
-    model = {
-        'encoder': model_encoder,
-        'depth_decoder': model_depth_decoder,
-        'seg_decoder': model_seg_decoder,
-        'vector_field': model_vector_field
-    }
-
-    # Optimizer
-    optimizer = optim.Adam(
-        list(model_encoder.parameters()) + 
-        list(model_depth_decoder.parameters()) + 
-        list(model_seg_decoder.parameters()) + 
-        list(model_vector_field.parameters()), 
-        lr=1e-4
-    )
-
-    num_epochs = 20
-
-    # Training Loop
-    for epoch in range(num_epochs):
-        model_encoder.train()
-        model_depth_decoder.train()
-        model_seg_decoder.train()
-        model_vector_field.train()
-
-        total_loss = 0
-        for batch in dataloader:
-         
-            # Get data from the batch
-            rgb = batch['rgb'].to(device)
-            mask = batch['mask'].to(device)
-            depth_map = batch['depth_map'].to(device)
-            segmentation_mask = batch['segmentation_mask'].to(device)
-            field_vectors = batch['vector_field'].to(device)
-            info_cams = batch['cam_K'].to(device)
-            extens = batch['extens'].to(device)
-            print('info_cams: ', info_cams)
-            fx, fy = info_cams[0, 0, 0], info_cams[0, 1, 1]
-            px, py = info_cams[0, 0, 2], info_cams[0, 1, 2]
-
-
-            # info_cams = torch.tensor(info_cams, dtype=torch.float32)
-            # extens = torch.tensor(extens, dtype=torch.float32)
-            # field_vectors = torch.tensor(field_vectors, dtype=torch.float32)
-            # segmentation_mask = torch.tensor(segmentation_mask, dtype=torch.float32)
-            # depth_map = torch.tensor(depth_map, dtype=torch.float32)
-            # mask = torch.tensor(mask, dtype=torch.float32)
-            # rgb = torch.tensor(rgb, dtype=torch.float32)
-
-            # Forward pass through the encoder
-            
-            print('segmentation_mask: ', segmentation_mask.shape)
-
-
-            features, features_2 = model['encoder'](rgb)
-            print('features: ', features[-1].shape)
-
-            # Decoder forward passes
-            depth = model['depth_decoder'](features)
-            for key, value in depth.items():
-                print(key, value.shape)
-            seg, bottom_label = model['seg_decoder'](features)
-            # print('bottom_label: ', bottom_label.shape)
-            depth_tensor = depth['disp', 0]
-            segmenta= seg['seg_logits', 0]
-            # print('features: ', features.shape)
-            # print('info_cams: ', info_cams.shape)
-            # print('extens: ', extens.shape)
-
-            # Assuming the vector field decoder takes in the features and produces predictions
-            bottom_vertex, bottom_label, vote_map, centers, translations = model['vector_field'](features,depth_tensor, segmenta, fx, fy , px, py )
-
-            # Calculate the losses for each task
-            depth_loss = torch.mean((depth_tensor - depth_map) ** 2)
-            seg_loss = torch.mean((segmenta - segmentation_mask) ** 2)
-            print('mask: ', mask.shape)
-            print('bottom_vertex: ', bottom_vertex.shape)
-            print('field_vectors: ', field_vectors.shape)
-            bottom_vertex = F.interpolate(bottom_vertex, size=(480, 640), mode='bilinear', align_corners=False)
-            bottom_vertex = bottom_vertex[:, :2, :, :]  # Use first 2 channels (x, y)
-            # Vector field loss (you can define it based on your task, here using a placeholder)
-            
-            vector_field_loss1= vector_field_loss(bottom_vertex, field_vectors, mask)
-            print('vector_field_loss1: ', vector_field_loss1)
-            # Total loss combining all tasks
-            total_loss = depth_loss + seg_loss + vector_field_loss1
-            # print(torch.cuda.memory_summary())
-            # Backpropagation and optimization
-            optimizer.zero_grad()
-            # print(torch.cuda.memory_summary())
-            total_loss.backward()
-            optimizer.step()
-          
-
-            # Print loss for this batch (optional, for debugging)
-            print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {total_loss.item()}")
-
-        # Optionally, save the model after each epoch
-        # torch.save(model.state_dict(), f'model_epoch_{epoch + 1}.pth')
-
 if __name__ == '__main__':
     print(torch.cuda.memory_summary())
-    train_model()
-    # data = BOPDataset(dataset_root='./data/lmo', split='train', obj_id=1)
-    # print(len(data))
-    # import matplotlib.pyplot as plt
-    # # Assuming `data` is your BOPDataset object and `sample` is a sample from it
-    # sample = data[1]
-
-    # # Extract the necessary data
-    # cam_R_m2c = sample['cam_R_m2c']
-    # cam_t_m2c = sample['cam_t_m2c']
-    # model = data.model  # 3D model (loaded earlier in the dataset)
-    # K = sample['cam_K']  # Camera intrinsic matrix
-    # K = np.array(K).reshape(3, 3)  # This should be a 3x3 matrix
-
-    # # Get the image dimensions
-    # height, width = sample['rgb'].shape[1:]
-
-    # # Generate the flow field
-    # flow_field = data.generate_field_vectors(cam_R_m2c, cam_t_m2c, model, K, height, width)
-
-    # # Optionally display the flow field (vectors as arrows)
-    # import matplotlib.pyplot as plt
-    # plt.quiver(flow_field[:,:,0], flow_field[:,:,1], scale=10)
-    # plt.title('Flow Field')
-    # plt.show()
-
-
-
-    # segmentation_mask = sample['segmentation_mask'].numpy()
-    # flow_field = data.generate_field_vectors(sample[], cam_t_m2c, model, K, height=480, width=640)
-    # Display the segmentation mask using matplotlib
-    # plt.imshow(segmentation_mask)
-    # plt.title('Segmentation Mask')
-    # plt.show()
 

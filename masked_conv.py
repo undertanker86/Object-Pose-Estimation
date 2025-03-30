@@ -201,12 +201,12 @@ class SparseConvNet(nn.Module):
     def __init__(self, in_channel ,activation=nn.ReLU):
         # in_channel = 1
         super(SparseConvNet, self).__init__()
-        self.conv1 = InstanceConv(in_channel=in_channel, out_channel=80, kernel_size=3, stride=1, padding=1)
+        self.conv1 = InstanceConv(in_channel=in_channel, out_channel=3, kernel_size=3, stride=1, padding=1)
         self.seq1 = nn.Sequential(
-            nn.BatchNorm2d(80),
+            nn.BatchNorm2d(3),
             activation(inplace=True),
         )
-        self.depth_pred = InstanceConv(in_channel=80, out_channel=1, kernel_size=1)
+        self.depth_pred = InstanceConv(in_channel=3, out_channel=1, kernel_size=1)
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """

@@ -9,7 +9,7 @@ import tomli
 from tqdm import tqdm
 import torch.nn as nn
 from model import MTGOE
-from mmd import PoseEstimationModel
+# from mmd import PoseEstimationModel
 from train_ver2 import BOPDataset
 from TeacherRenderer import TeacherRenderer
 from self_supervision import TeacherStudentTrainer, GeometryGuidedFilter
@@ -33,7 +33,44 @@ class MultiTaskLoss(nn.Module):
             total_loss: combined loss value
         """
         vote_map, centers, translations, depth, seg, vector_field, _ = outputs
-        
+        if 'pose' in targets and targets['pose'] is not None:
+            # Ground truth poses and centers available
+            gt_translations = targets['pose']['t']  # Ground truth translations [N_gt, 3]
+            gt_centers = targets['pose']['centers']  # Ground truth centers [N_gt, 2]
+
+            # Compute position error for each prediction
+            if len(translations) > 0 and len(gt_translations) > 0:
+                pos_errors = []
+                center_errors = []  # To store center errors
+
+                for pred_t, pred_c in zip(translations, centers):
+                    # Translation error: Find closest ground truth translation
+                    dists_t = torch.norm(pred_t.unsqueeze(0) - gt_translations, dim=1)
+                    min_dist_t = torch.min(dists_t)
+                    pos_errors.append(min_dist_t)
+
+                    # Center error: Compute MSE with ground truth centers
+                    dists_c = torch.norm(pred_c.unsqueeze(0) - gt_centers, dim=1)
+                    min_dist_c = torch.min(dists_c)
+                    center_errors.append(min_dist_c)
+
+                # Aggregate position and center errors
+                if pos_errors:
+                    pos_loss = torch.stack(pos_errors).mean()
+                else:
+                    pos_loss = torch.tensor(0.0, device=depth.device)
+
+                if center_errors:
+                    center_loss = torch.stack(center_errors).mean()
+                else:
+                    center_loss = torch.tensor(0.0, device=depth.device)
+
+            else:
+                pos_loss = torch.tensor(0.0, device=depth.device)
+                center_loss = torch.tensor(0.0, device=depth.device)
+        else:
+            pos_loss = torch.tensor(0.0, device=depth.device)
+            center_loss = torch.tensor(0.0, device=depth.device)
         # Pose loss (position error)
         if 'pose' in targets and targets['pose'] is not None:
             # Ground truth poses available
@@ -110,6 +147,7 @@ class MultiTaskLoss(nn.Module):
             self.lambda_depth * depth_loss +
             self.lambda_seg * seg_loss +
             self.lambda_vf * vf_loss
+            + center_loss * 0.5
         )
         
         return total_loss, {
@@ -191,13 +229,13 @@ mtgoe_model = MTGOE(
     image_width=config['data']['image_width']
 ).to(device)
 
-pose_model = PoseEstimationModel(
-    depth_channels=1,
-    seg_channels=19,
-    vector_channels=2,
-    feature_dim=256,
-    num_keypoints=8
-).to(device)
+# pose_model = PoseEstimationModel(
+#     depth_channels=1,
+#     seg_channels=19,
+#     vector_channels=2,
+#     feature_dim=256,
+#     num_keypoints=8
+# ).to(device)
 
 # Initialize loss function
 multi_task_loss = MultiTaskLoss(
@@ -209,7 +247,7 @@ multi_task_loss = MultiTaskLoss(
 
 # Initialize optimizer
 optimizer = optim.Adam(
-    list(mtgoe_model.parameters()) + list(pose_model.parameters()),
+    list(mtgoe_model.parameters()),
     lr=config['training']['learning_rate'],
     weight_decay=config['training']['weight_decay']
 )
@@ -228,7 +266,7 @@ if args.resume:
         print(f"Loading checkpoint from {args.resume}")
         checkpoint = torch.load(args.resume)
         mtgoe_model.load_state_dict(checkpoint['mtgoe_state_dict'])
-        pose_model.load_state_dict(checkpoint['pose_state_dict'])
+        # pose_model.load_state_dict(checkpoint['pose_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
@@ -242,7 +280,7 @@ def save_checkpoint(epoch, is_best=False):
     torch.save({
         'epoch': epoch,
         'mtgoe_state_dict': mtgoe_model.state_dict(),
-        'pose_state_dict': pose_model.state_dict(),
+        # 'pose_state_dict': pose_model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'scheduler_state_dict': scheduler.state_dict(),
     }, checkpoint_path)
@@ -252,7 +290,7 @@ def save_checkpoint(epoch, is_best=False):
         torch.save({
             'epoch': epoch,
             'mtgoe_state_dict': mtgoe_model.state_dict(),
-            'pose_state_dict': pose_model.state_dict(),
+            # 'pose_state_dict': pose_model.state_dict(),
         }, best_path)
     
     print(f"Checkpoint saved to {checkpoint_path}")
@@ -262,7 +300,7 @@ def train_supervised(num_epochs):
     """Train with synthetic data"""
     print(f"\nStarting supervised training for {num_epochs} epochs...")
     mtgoe_model.train()
-    pose_model.train()
+    # pose_model.train()
     
     for epoch in range(start_epoch, start_epoch + num_epochs):
         epoch_losses = {'total': 0, 'pos': 0, 'depth': 0, 'seg': 0, 'vf': 0}
@@ -301,7 +339,7 @@ def train_supervised(num_epochs):
             
             # Gradient clipping
             torch.nn.utils.clip_grad_norm_(
-                list(mtgoe_model.parameters()) + list(pose_model.parameters()), 
+                list(mtgoe_model.parameters()), 
                 config['training']['gradient_clip']
             )
             
@@ -362,7 +400,7 @@ def train_self_supervised(num_epochs, start_from_epoch):
     )
     
     mtgoe_model.train()
-    pose_model.train()
+    # pose_model.train()
     
     for epoch in range(start_from_epoch, start_from_epoch + num_epochs):
         epoch_losses = {'total': 0, 'pos': 0, 'depth': 0, 'seg': 0, 'vf': 0}
@@ -408,7 +446,7 @@ def evaluate():
     """Evaluate the model on test data"""
     print("\nEvaluating model...")
     mtgoe_model.eval()
-    pose_model.eval()
+    # pose_model.eval()
     
     # Metrics
     translation_errors = []

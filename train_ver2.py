@@ -14,7 +14,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 import masked_conv
 from TeacherRenderer import TeacherRenderer
-from mmd import PoseEstimationModel
+# from mmd import PoseEstimationModel
 
 # import FSREDepth.networks.cma as cma
 
@@ -263,7 +263,14 @@ class BOPDataset(Dataset):
                 
             with open(scene_camera_path, 'r') as f:
                 scene_camera = json.load(f)
-                
+
+            # Load gt info if available
+            gt_info = {}
+            gt_info_path = os.path.join(scene_path, 'scene_gt_info.json') 
+            if os.path.exists(gt_info_path):
+                with open(gt_info_path, 'r') as f:
+                    gt_info = json.load(f)
+
             # Iterate over images in this scene
             for img_id_str, objects in scene_gt.items():
                 img_id = int(img_id_str)
@@ -292,6 +299,28 @@ class BOPDataset(Dataset):
                         mask_exists = os.path.exists(mask_path)
                         mask_visib_exists = os.path.exists(mask_visib_path)
                         
+                        # Initialize bbox values
+                        gt_center_x, gt_center_y, visib_fract = 0, 0, 0
+                        
+                        # Get bbox info if available
+                        if img_id_str in gt_info:
+                            img_gt_info = gt_info[img_id_str]
+                            # Check if gt_info contains a list of objects
+                            if isinstance(img_gt_info, list) and len(img_gt_info) > obj_idx:
+                                obj_gt_info = img_gt_info[obj_idx]
+                                if "bbox_obj" in obj_gt_info and "visib_fract" in obj_gt_info:
+                                    bbox_obj = obj_gt_info["bbox_obj"]
+                                    visib_fract = obj_gt_info["visib_fract"]
+                                    gt_center_x = bbox_obj[0] + bbox_obj[2] / 2
+                                    gt_center_y = bbox_obj[1] + bbox_obj[3] / 2
+                            # If gt_info is a dictionary (for single object)
+                            elif isinstance(img_gt_info, dict):
+                                if "bbox_obj" in img_gt_info and "visib_fract" in img_gt_info:
+                                    bbox_obj = img_gt_info["bbox_obj"]
+                                    visib_fract = img_gt_info["visib_fract"]
+                                    gt_center_x = bbox_obj[0] + bbox_obj[2] / 2
+                                    gt_center_y = bbox_obj[1] + bbox_obj[3] / 2
+                        
                         # Add sample to dataset
                         self.data.append({
                             'scene_id': scene_folder,
@@ -303,7 +332,10 @@ class BOPDataset(Dataset):
                             'mask_visib_path': mask_visib_path if mask_visib_exists else None,
                             'cam_R_m2c': obj_info.get('cam_R_m2c', None),
                             'cam_t_m2c': obj_info.get('cam_t_m2c', None),
-                            'cam_K': cam_params.get('cam_K', None)
+                            'cam_K': cam_params.get('cam_K', None),
+                            'gt_center_x': gt_center_x,
+                            'gt_center_y': gt_center_y,
+                            'visib_fract': visib_fract,
                         })
         
         print(f"Loaded {len(self.data)} samples for object {obj_id} in {split} set")
@@ -338,7 +370,15 @@ class BOPDataset(Dataset):
         rgb_tensor = torch.from_numpy(rgb.transpose(2, 0, 1)).float() / 255.0  # Normalize to [0, 1]
         mask_tensor = torch.from_numpy(mask).float()
         mask_visib_tensor = torch.from_numpy(mask_visib).float()
-        
+
+        gt_center_x = sample['gt_center_x']
+        gt_center_y = sample['gt_center_y']
+        visib_fract = sample['visib_fract']
+
+        gt_center_x_tensor = torch.tensor(gt_center_x, dtype=torch.float32)
+        gt_center_y_tensor = torch.tensor(gt_center_y, dtype=torch.float32)
+        visib_fract_tensor = torch.tensor(visib_fract, dtype=torch.float32)
+
         # Get camera parameters
         cam_K = np.array(sample['cam_K']).reshape(3, 3)
         cam_K_tensor = torch.from_numpy(cam_K).float()
@@ -375,7 +415,10 @@ class BOPDataset(Dataset):
             'mask_visib': mask_visib_tensor,
             'cam_K': cam_K_tensor,
             'obj_id': sample['obj_id'],
-            'img_id': sample['img_id']
+            'img_id': sample['img_id'],
+            'gt_center_x': gt_center_x_tensor,
+            'gt_center_y': gt_center_y_tensor,
+            'visib_fract': visib_fract_tensor
         }
         
         # Add optional fields if available
@@ -503,25 +546,6 @@ class BOPDataset(Dataset):
         except Exception as e:
             print(f"Error computing extent from {model_path}: {e}")
             return np.array([0.1, 0.1, 0.1])  # Default extent
-def vector_field_loss(pred_vectors, gt_vectors, mask):
-    """
-    Computes the vector field loss (Lvf) using Smooth L1 loss.
-
-    Args:
-        pred_vectors (torch.Tensor): Predicted vector field (B, 2, H, W)
-        gt_vectors (torch.Tensor): Ground truth vector field (B, 2, H, W)
-        mask (torch.Tensor): Binary mask for object pixels (B, 1, H, W)
-
-    Returns:
-        torch.Tensor: Loss scalar
-    """
-    gt_vectors = gt_vectors.permute(0, 3, 1, 2)
-    # Ensure the loss is only computed for object pixels
-    mask = mask.float()
-    loss = F.smooth_l1_loss(pred_vectors * mask, gt_vectors * mask, reduction='sum')
-
-    num_object_pixels = mask.sum() + 1e-6  # Avoid division by zero
-    return loss / num_object_pixels
 
 if __name__ == '__main__':
     print(torch.cuda.memory_summary())

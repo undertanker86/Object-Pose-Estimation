@@ -219,6 +219,7 @@ class TeacherStudentTrainer:
                 'R': torch.stack([pred['R'] for pred in filtered_predictions]),
                 't': torch.stack([pred['t'] for pred in filtered_predictions])
             }
+            
         }
 
     def train_step(self, batch, optimizer, criterion):

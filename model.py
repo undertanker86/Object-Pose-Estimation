@@ -23,8 +23,8 @@ print(config)
 class MTGOE(nn.Module):
     def __init__(self, image_height, image_width, in_channel=1):
         super(MTGOE, self).__init__()
-        self.encoder = timm.create_model('resnet50.a1_in1k',
-                                         pretrained=False,
+        self.encoder = timm.create_model('tf_mobilenetv3_small_minimal_100.in1k',
+                                         pretrained=True,
                                          features_only = True)
         self.cma = CMA(
             num_ch_enc=config["cma"]["num_ch_enc"],

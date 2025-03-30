@@ -1,5 +1,5 @@
 [cma]
-num_ch_enc = [64, 256, 512, 1024, 2048]
+num_ch_enc = [16, 16, 24, 48, 576]
 scales = [0, 1, 2, 3]
 cma_layers = [2, 1]
 num_head = 4
@@ -7,7 +7,7 @@ head_ratio = 2
 sgt = 0.1
 
 [vector_decoder]
-in_channels_list = [64, 256, 512, 1024, 2048]
+in_channels_list = [16, 16, 24, 48, 576]
 
 [training]
 batch_size = 2

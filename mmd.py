@@ -73,35 +73,36 @@ class MMD(nn.Module):
 
         return fused_features
 
-class KeypointPoseEstimation(nn.Module):
-    def __init__(self, feature_dim=256, num_keypoints=8):
-        super(KeypointPoseEstimation, self).__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.flatten = nn.Flatten()
-        self.fc = nn.Linear(feature_dim, 512)
-        self.relu = nn.ReLU(inplace=True)
-        self.dropout = nn.Dropout(0.5)
+# class KeypointPoseEstimation(nn.Module):
+#     def __init__(self, feature_dim=256, num_keypoints=8):
+#         super(KeypointPoseEstimation, self).__init__()
+#         self.avg_pool = nn.AdaptiveAvgPool2d(1)
+#         self.flatten = nn.Flatten()
+#         self.fc = nn.Linear(feature_dim, 512)
+#         self.relu = nn.ReLU(inplace=True)
+#         self.dropout = nn.Dropout(0.5)
         
-        self.fc_pos = nn.Linear(512, 3)  # Predicts object position (x, y, z)
-        self.fc_keypoints = nn.Linear(512, num_keypoints * 2)  # Predicts keypoints (u, v)
+#         self.fc_pos = nn.Linear(512, 3)  # Predicts object position (x, y, z)
+#         self.fc_keypoints = nn.Linear(512, num_keypoints * 2)  # Predicts keypoints (u, v)
     
-    def forward(self, x):
-        x = self.avg_pool(x)
-        x = self.flatten(x)
-        x = self.relu(self.fc(x))
-        x = self.dropout(x)
+#     def forward(self, x):
+#         x = self.avg_pool(x)
+#         x = self.flatten(x)
+#         x = self.relu(self.fc(x))
+#         x = self.dropout(x)
         
-        position = self.fc_pos(x)
-        keypoints = self.fc_keypoints(x).view(x.size(0), -1, 2)  # Reshape to (batch, num_keypoints, 2)
-        return position, keypoints
+#         position = self.fc_pos(x)
+#         keypoints = self.fc_keypoints(x).view(x.size(0), -1, 2)  # Reshape to (batch, num_keypoints, 2)
+#         return position, keypoints
 
-class PoseEstimationModel(nn.Module):
-    def __init__(self, depth_channels=1, seg_channels=19, vector_channels=2, feature_dim=256, num_keypoints=8):
-        super(PoseEstimationModel, self).__init__()
-        self.mmd = MMD(depth_channels, seg_channels, vector_channels)
-        self.pose_estimation = KeypointPoseEstimation(feature_dim, num_keypoints)
+# class PoseEstimationModel(nn.Module):
+#     def __init__(self, depth_channels=1, seg_channels=19, vector_channels=2, feature_dim=256, num_keypoints=8):
+#         super(PoseEstimationModel, self).__init__()
+#         self.mmd = MMD(depth_channels, seg_channels, vector_channels)
+#         self.pose_estimation = KeypointPoseEstimation(feature_dim, num_keypoints)
     
-    def forward(self, depth_features, seg_features, vector_features):
-        fused_features = self.mmd(depth_features, seg_features, vector_features)
-        position, keypoints = self.pose_estimation(fused_features)
-        return position, keypoints
+#     def forward(self, depth_features, seg_features, vector_features):
+#         fused_features = self.mmd(depth_features, seg_features, vector_features)
+#         position, keypoints = self.pose_estimation(fused_features)
+#         return position, keypoints
+    

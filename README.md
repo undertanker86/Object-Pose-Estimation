@@ -15,4 +15,4 @@ pytorch = 2.6
 - [ ] Cuda kernel for voting because CUDA error: an illegal memory access was encountered
 - [ ] Data augmentation
 - [ ] More......
-## Use config.toml to adjust, and run python.py
+## Use config.toml to adjust, and run "main.py"
